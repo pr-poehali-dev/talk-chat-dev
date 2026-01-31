@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -8,45 +8,261 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import Icon from '@/components/ui/icon';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { toast } from 'sonner';
+import API_URLS from '../../backend/func2url.json';
+
+interface User {
+  id: number;
+  username: string;
+  email: string;
+  avatar_url?: string;
+}
+
+interface Chat {
+  id: number;
+  other_user_id: number;
+  other_username: string;
+  other_avatar?: string;
+  last_message?: string;
+  last_message_time?: string;
+}
+
+interface Message {
+  id: number;
+  sender_id: number;
+  text: string;
+  created_at: string;
+}
 
 const Index = () => {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [currentView, setCurrentView] = useState('login');
-  const [selectedChat, setSelectedChat] = useState<number | null>(null);
-  const [messages, setMessages] = useState<{ id: number; text: string; sender: 'me' | 'other'; time: string }[]>([
-    { id: 1, text: 'Привет! Как дела?', sender: 'other', time: '10:30' },
-    { id: 2, text: 'Отлично! А у тебя?', sender: 'me', time: '10:32' },
-    { id: 3, text: 'Тоже хорошо, спасибо!', sender: 'other', time: '10:33' },
-  ]);
+  const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [messageInput, setMessageInput] = useState('');
+  
+  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [verificationCode, setVerificationCode] = useState('');
+  const [pendingUserId, setPendingUserId] = useState<number | null>(null);
+  const [showVerification, setShowVerification] = useState(false);
+  
+  const [showSettings, setShowSettings] = useState(false);
+  const [showNewChat, setShowNewChat] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<User[]>([]);
+  const [activeTab, setActiveTab] = useState('chats');
 
-  const mockChats = [
-    { id: 1, name: 'Алексей Иванов', username: '@alexivanov', avatar: '', lastMessage: 'Как дела?', time: '10:33', unread: 2, online: true },
-    { id: 2, name: 'Мария Петрова', username: '@mariapetrova', avatar: '', lastMessage: 'Отправил файлы', time: 'Вчера', unread: 0, online: false },
-    { id: 3, name: 'Дмитрий Смирнов', username: '@dmitrysmirnov', avatar: '', lastMessage: 'Созвон в 15:00', time: '15 янв', unread: 5, online: true },
-    { id: 4, name: 'Екатерина Волкова', username: '@katevolkova', avatar: '', lastMessage: 'Спасибо!', time: '14 янв', unread: 0, online: false },
-  ];
+  useEffect(() => {
+    if (currentUser) {
+      loadChats();
+    }
+  }, [currentUser]);
 
-  const mockGroups = [
-    { id: 1, name: 'Админы', members: 5, lastMessage: 'Новое обновление', time: '12:00' },
-    { id: 2, name: 'Модераторы', members: 12, lastMessage: 'Проверьте отчёты', time: '11:30' },
-    { id: 3, name: 'Поддержка', members: 8, lastMessage: 'Ответил клиенту', time: 'Вчера' },
-    { id: 4, name: 'Разработчики', members: 20, lastMessage: 'Фикс бага готов', time: '13 янв' },
-  ];
+  useEffect(() => {
+    if (selectedChat && currentUser) {
+      loadMessages(selectedChat.id);
+      const interval = setInterval(() => loadMessages(selectedChat.id), 3000);
+      return () => clearInterval(interval);
+    }
+  }, [selectedChat]);
 
-  const handleSendMessage = () => {
-    if (messageInput.trim()) {
-      setMessages([...messages, {
-        id: messages.length + 1,
-        text: messageInput,
-        sender: 'me',
-        time: new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
-      }]);
-      setMessageInput('');
+  const handleRegister = async () => {
+    try {
+      const response = await fetch(API_URLS.auth, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'register', email, username, password })
+      });
+      const data = await response.json();
+      
+      if (response.ok) {
+        setPendingUserId(data.user_id);
+        setShowVerification(true);
+        toast.success('Код отправлен на вашу почту!');
+      } else {
+        toast.error(data.error || 'Ошибка регистрации');
+      }
+    } catch (error) {
+      toast.error('Ошибка подключения к серверу');
     }
   };
 
-  if (!isAuthenticated) {
+  const handleVerify = async () => {
+    try {
+      const response = await fetch(API_URLS.auth, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'verify', user_id: pendingUserId, code: verificationCode })
+      });
+      const data = await response.json();
+      
+      if (response.ok) {
+        toast.success('Email подтверждён! Войдите в аккаунт');
+        setShowVerification(false);
+        setCurrentView('login');
+        setVerificationCode('');
+      } else {
+        toast.error(data.error || 'Неверный код');
+      }
+    } catch (error) {
+      toast.error('Ошибка подключения к серверу');
+    }
+  };
+
+  const handleLogin = async () => {
+    try {
+      const response = await fetch(API_URLS.auth, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'login', email, password })
+      });
+      const data = await response.json();
+      
+      if (response.ok) {
+        setCurrentUser(data.user);
+        toast.success(`Добро пожаловать, @${data.user.username}!`);
+      } else {
+        toast.error(data.error || 'Ошибка входа');
+      }
+    } catch (error) {
+      toast.error('Ошибка подключения к серверу');
+    }
+  };
+
+  const loadChats = async () => {
+    if (!currentUser) return;
+    
+    try {
+      const response = await fetch(`${API_URLS.chats}?user_id=${currentUser.id}`);
+      const data = await response.json();
+      if (response.ok) {
+        setChats(data.chats);
+      }
+    } catch (error) {
+      console.error('Error loading chats:', error);
+    }
+  };
+
+  const loadMessages = async (chatId: number) => {
+    try {
+      const response = await fetch(API_URLS.chats, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'get_messages', chat_id: chatId })
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setMessages(data.messages);
+      }
+    } catch (error) {
+      console.error('Error loading messages:', error);
+    }
+  };
+
+  const handleSendMessage = async () => {
+    if (!messageInput.trim() || !selectedChat || !currentUser) return;
+
+    try {
+      const response = await fetch(API_URLS.chats, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'send_message',
+          chat_id: selectedChat.id,
+          sender_id: currentUser.id,
+          text: messageInput
+        })
+      });
+      
+      if (response.ok) {
+        setMessageInput('');
+        loadMessages(selectedChat.id);
+        loadChats();
+      }
+    } catch (error) {
+      toast.error('Ошибка отправки сообщения');
+    }
+  };
+
+  const searchUsers = async () => {
+    if (!searchQuery.trim()) return;
+
+    try {
+      const response = await fetch(API_URLS.chats, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'search_users', query: searchQuery })
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setSearchResults(data.users.filter((u: User) => u.id !== currentUser?.id));
+      }
+    } catch (error) {
+      toast.error('Ошибка поиска');
+    }
+  };
+
+  const createChat = async (otherUserId: number) => {
+    if (!currentUser) return;
+
+    try {
+      const response = await fetch(API_URLS.chats, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'create_chat',
+          user1_id: currentUser.id,
+          user2_id: otherUserId
+        })
+      });
+      const data = await response.json();
+      
+      if (response.ok) {
+        setShowNewChat(false);
+        setSearchQuery('');
+        setSearchResults([]);
+        loadChats();
+        toast.success('Чат создан!');
+      }
+    } catch (error) {
+      toast.error('Ошибка создания чата');
+    }
+  };
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !currentUser) return;
+
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      try {
+        const response = await fetch(API_URLS.profile, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'upload_avatar',
+            user_id: currentUser.id,
+            avatar: reader.result
+          })
+        });
+        const data = await response.json();
+        
+        if (response.ok) {
+          setCurrentUser({ ...currentUser, avatar_url: data.avatar_url });
+          toast.success('Аватар обновлён!');
+        }
+      } catch (error) {
+        toast.error('Ошибка загрузки аватара');
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  if (!currentUser) {
     return (
       <div className="min-h-screen flex items-center justify-center gradient-yellow-soft">
         <Card className="w-full max-w-md p-8 shadow-2xl animate-fade-in border-2 border-primary/20">
@@ -67,15 +283,27 @@ const Index = () => {
             <TabsContent value="login" className="space-y-4">
               <div>
                 <label className="text-sm font-medium mb-2 block">Email</label>
-                <Input type="email" placeholder="example@mail.com" className="h-12" />
+                <Input
+                  type="email"
+                  placeholder="example@mail.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="h-12"
+                />
               </div>
               <div>
                 <label className="text-sm font-medium mb-2 block">Пароль</label>
-                <Input type="password" placeholder="••••••••" className="h-12" />
+                <Input
+                  type="password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="h-12"
+                />
               </div>
-              <Button 
-                className="w-full h-12 gradient-yellow text-white font-semibold hover:opacity-90 transition-opacity shadow-lg" 
-                onClick={() => setIsAuthenticated(true)}
+              <Button
+                className="w-full h-12 gradient-yellow text-white font-semibold hover:opacity-90 transition-opacity shadow-lg"
+                onClick={handleLogin}
               >
                 Войти
               </Button>
@@ -84,39 +312,76 @@ const Index = () => {
             <TabsContent value="register" className="space-y-4">
               <div>
                 <label className="text-sm font-medium mb-2 block">Email</label>
-                <Input type="email" placeholder="example@mail.com" className="h-12" />
+                <Input
+                  type="email"
+                  placeholder="example@mail.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="h-12"
+                />
               </div>
               <div>
                 <label className="text-sm font-medium mb-2 block">Username</label>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">@</span>
-                  <Input placeholder="username" className="h-12 pl-8" />
+                  <Input
+                    placeholder="username"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    className="h-12 pl-8"
+                  />
                 </div>
               </div>
               <div>
                 <label className="text-sm font-medium mb-2 block">Пароль</label>
-                <Input type="password" placeholder="••••••••" className="h-12" />
+                <Input
+                  type="password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="h-12"
+                />
               </div>
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 flex items-start gap-2">
                 <Icon name="Mail" size={18} className="text-yellow-600 mt-0.5" />
                 <p className="text-xs text-yellow-800">На вашу почту будет отправлен код подтверждения</p>
               </div>
-              <Button 
+              <Button
                 className="w-full h-12 gradient-yellow text-white font-semibold hover:opacity-90 transition-opacity shadow-lg"
-                onClick={() => setIsAuthenticated(true)}
+                onClick={handleRegister}
               >
                 Зарегистрироваться
               </Button>
             </TabsContent>
           </Tabs>
         </Card>
+
+        <Dialog open={showVerification} onOpenChange={setShowVerification}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Подтверждение Email</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <p className="text-sm text-muted-foreground">Введите 6-значный код, отправленный на вашу почту</p>
+              <Input
+                placeholder="000000"
+                value={verificationCode}
+                onChange={(e) => setVerificationCode(e.target.value)}
+                maxLength={6}
+                className="text-center text-2xl tracking-widest"
+              />
+              <Button onClick={handleVerify} className="w-full gradient-yellow text-white">
+                Подтвердить
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     );
   }
 
   return (
     <div className="flex h-screen bg-gray-50">
-      {/* Sidebar */}
       <div className="w-20 bg-white border-r border-gray-200 flex flex-col items-center py-6 gap-6">
         <div className="w-12 h-12 gradient-yellow rounded-xl flex items-center justify-center shadow-lg hover-scale cursor-pointer">
           <Icon name="MessageSquare" size={24} className="text-white" />
@@ -124,7 +389,12 @@ const Index = () => {
         
         <Separator className="w-8" />
         
-        <Button variant="ghost" size="icon" className="rounded-xl hover:bg-yellow-50">
+        <Button
+          variant={activeTab === 'chats' ? 'default' : 'ghost'}
+          size="icon"
+          className={`rounded-xl ${activeTab === 'chats' ? 'gradient-yellow text-white' : 'hover:bg-yellow-50'}`}
+          onClick={() => setActiveTab('chats')}
+        >
           <Icon name="MessageCircle" size={24} />
         </Button>
         
@@ -136,7 +406,12 @@ const Index = () => {
           <Icon name="User" size={24} />
         </Button>
         
-        <Button variant="ghost" size="icon" className="rounded-xl hover:bg-yellow-50">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="rounded-xl hover:bg-yellow-50"
+          onClick={() => setShowSettings(true)}
+        >
           <Icon name="Settings" size={24} />
         </Button>
 
@@ -147,141 +422,107 @@ const Index = () => {
         </div>
       </div>
 
-      {/* Chat List */}
       <div className="w-80 bg-white border-r border-gray-200 flex flex-col">
         <div className="p-4 border-b border-gray-200">
-          <h2 className="text-2xl font-bold mb-4">Чаты</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-2xl font-bold">Чаты</h2>
+            <Button
+              size="icon"
+              className="gradient-yellow text-white hover:opacity-90"
+              onClick={() => setShowNewChat(true)}
+            >
+              <Icon name="Plus" size={20} />
+            </Button>
+          </div>
           <div className="relative">
             <Icon name="Search" size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <Input placeholder="Поиск..." className="pl-10 bg-gray-50 border-gray-200" />
           </div>
         </div>
 
-        <Tabs defaultValue="chats" className="flex-1 flex flex-col">
-          <TabsList className="w-full rounded-none border-b">
-            <TabsTrigger value="chats" className="flex-1">Чаты</TabsTrigger>
-            <TabsTrigger value="groups" className="flex-1">Группы</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="chats" className="flex-1 m-0">
-            <ScrollArea className="h-full">
-              {mockChats.map((chat) => (
-                <div
-                  key={chat.id}
-                  onClick={() => setSelectedChat(chat.id)}
-                  className={`p-4 border-b border-gray-100 cursor-pointer transition-colors hover:bg-gray-50 ${
-                    selectedChat === chat.id ? 'bg-yellow-50' : ''
-                  }`}
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="relative">
-                      <Avatar>
-                        <AvatarImage src={chat.avatar} />
-                        <AvatarFallback className="gradient-yellow text-white font-semibold">
-                          {chat.name.split(' ').map(n => n[0]).join('')}
-                        </AvatarFallback>
-                      </Avatar>
-                      {chat.online && (
-                        <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between mb-1">
-                        <h3 className="font-semibold truncate">{chat.name}</h3>
-                        <span className="text-xs text-gray-500">{chat.time}</span>
-                      </div>
-                      <p className="text-sm text-gray-500 truncate">{chat.lastMessage}</p>
-                    </div>
-                    {chat.unread > 0 && (
-                      <Badge className="gradient-yellow text-white border-0 ml-2">{chat.unread}</Badge>
+        <ScrollArea className="flex-1">
+          {chats.length === 0 ? (
+            <div className="p-8 text-center">
+              <Icon name="MessageCircleOff" size={48} className="mx-auto mb-4 text-gray-300" />
+              <p className="text-sm text-gray-500">Нет активных чатов</p>
+              <Button
+                variant="link"
+                className="text-yellow-600 mt-2"
+                onClick={() => setShowNewChat(true)}
+              >
+                Создать новый чат
+              </Button>
+            </div>
+          ) : (
+            chats.map((chat) => (
+              <div
+                key={chat.id}
+                onClick={() => setSelectedChat(chat)}
+                className={`p-4 border-b border-gray-100 cursor-pointer transition-colors hover:bg-gray-50 ${
+                  selectedChat?.id === chat.id ? 'bg-yellow-50' : ''
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <Avatar>
+                    <AvatarImage src={chat.other_avatar} />
+                    <AvatarFallback className="gradient-yellow text-white font-semibold">
+                      {chat.other_username.substring(0, 2).toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-semibold truncate">@{chat.other_username}</h3>
+                    {chat.last_message && (
+                      <p className="text-sm text-gray-500 truncate">{chat.last_message}</p>
                     )}
                   </div>
                 </div>
-              ))}
-            </ScrollArea>
-          </TabsContent>
-
-          <TabsContent value="groups" className="flex-1 m-0">
-            <ScrollArea className="h-full">
-              {mockGroups.map((group) => (
-                <div key={group.id} className="p-4 border-b border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors">
-                  <div className="flex items-start gap-3">
-                    <Avatar>
-                      <AvatarFallback className="bg-gradient-to-br from-yellow-400 to-yellow-600 text-white">
-                        <Icon name="Users" size={20} />
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between mb-1">
-                        <h3 className="font-semibold">{group.name}</h3>
-                        <span className="text-xs text-gray-500">{group.time}</span>
-                      </div>
-                      <p className="text-xs text-gray-500 mb-1">{group.members} участников</p>
-                      <p className="text-sm text-gray-500 truncate">{group.lastMessage}</p>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </ScrollArea>
-          </TabsContent>
-        </Tabs>
+              </div>
+            ))
+          )}
+        </ScrollArea>
       </div>
 
-      {/* Chat Window */}
       <div className="flex-1 flex flex-col">
         {selectedChat ? (
           <>
-            {/* Chat Header */}
             <div className="h-16 bg-white border-b border-gray-200 px-6 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <Avatar>
-                  <AvatarFallback className="gradient-yellow text-white">AI</AvatarFallback>
+                  <AvatarImage src={selectedChat.other_avatar} />
+                  <AvatarFallback className="gradient-yellow text-white">
+                    {selectedChat.other_username.substring(0, 2).toUpperCase()}
+                  </AvatarFallback>
                 </Avatar>
                 <div>
-                  <h3 className="font-semibold">Алексей Иванов</h3>
-                  <p className="text-xs text-green-600 flex items-center gap-1">
-                    <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-                    онлайн
-                  </p>
+                  <h3 className="font-semibold">@{selectedChat.other_username}</h3>
                 </div>
-              </div>
-              <div className="flex gap-2">
-                <Button variant="ghost" size="icon" className="hover:bg-yellow-50">
-                  <Icon name="Phone" size={20} />
-                </Button>
-                <Button variant="ghost" size="icon" className="hover:bg-yellow-50">
-                  <Icon name="Video" size={20} />
-                </Button>
-                <Button variant="ghost" size="icon" className="hover:bg-yellow-50">
-                  <Icon name="MoreVertical" size={20} />
-                </Button>
               </div>
             </div>
 
-            {/* Messages */}
             <ScrollArea className="flex-1 p-6 bg-gradient-to-b from-gray-50 to-white">
               <div className="space-y-4 max-w-3xl mx-auto">
                 {messages.map((msg) => (
                   <div
                     key={msg.id}
-                    className={`flex ${msg.sender === 'me' ? 'justify-end' : 'justify-start'} animate-fade-in`}
+                    className={`flex ${msg.sender_id === currentUser.id ? 'justify-end' : 'justify-start'} animate-fade-in`}
                   >
                     <div
                       className={`max-w-md px-4 py-3 rounded-2xl shadow-sm ${
-                        msg.sender === 'me'
+                        msg.sender_id === currentUser.id
                           ? 'gradient-yellow text-gray-800 rounded-br-sm'
                           : 'bg-white text-gray-800 rounded-bl-sm'
                       }`}
                     >
                       <p className="text-sm">{msg.text}</p>
-                      <span className="text-xs opacity-70 mt-1 block">{msg.time}</span>
+                      <span className="text-xs opacity-70 mt-1 block">
+                        {new Date(msg.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                      </span>
                     </div>
                   </div>
                 ))}
               </div>
             </ScrollArea>
 
-            {/* Message Input */}
             <div className="h-20 bg-white border-t border-gray-200 px-6 flex items-center gap-3">
               <Button variant="ghost" size="icon" className="hover:bg-yellow-50">
                 <Icon name="Paperclip" size={20} />
@@ -293,10 +534,7 @@ const Index = () => {
                 onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
                 className="flex-1 bg-gray-50 border-gray-200"
               />
-              <Button variant="ghost" size="icon" className="hover:bg-yellow-50">
-                <Icon name="Smile" size={20} />
-              </Button>
-              <Button 
+              <Button
                 onClick={handleSendMessage}
                 className="gradient-yellow text-white hover:opacity-90 h-10 px-6"
               >
@@ -316,6 +554,83 @@ const Index = () => {
           </div>
         )}
       </div>
+
+      <Dialog open={showNewChat} onOpenChange={setShowNewChat}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Новый чат</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="flex gap-2">
+              <Input
+                placeholder="Поиск по username..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && searchUsers()}
+              />
+              <Button onClick={searchUsers} className="gradient-yellow text-white">
+                <Icon name="Search" size={18} />
+              </Button>
+            </div>
+            <ScrollArea className="h-64">
+              {searchResults.map((user) => (
+                <div
+                  key={user.id}
+                  className="flex items-center gap-3 p-3 hover:bg-gray-50 rounded-lg cursor-pointer"
+                  onClick={() => createChat(user.id)}
+                >
+                  <Avatar>
+                    <AvatarImage src={user.avatar_url} />
+                    <AvatarFallback className="gradient-yellow text-white">
+                      {user.username.substring(0, 2).toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <p className="font-semibold">@{user.username}</p>
+                  </div>
+                </div>
+              ))}
+            </ScrollArea>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showSettings} onOpenChange={setShowSettings}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Настройки профиля</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-6 py-4">
+            <div className="flex flex-col items-center gap-4">
+              <Avatar className="w-24 h-24">
+                <AvatarImage src={currentUser.avatar_url} />
+                <AvatarFallback className="gradient-yellow text-white text-2xl">
+                  {currentUser.username.substring(0, 2).toUpperCase()}
+                </AvatarFallback>
+              </Avatar>
+              <label className="cursor-pointer">
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleAvatarUpload}
+                />
+                <Button className="gradient-yellow text-white" asChild>
+                  <span>Загрузить аватар</span>
+                </Button>
+              </label>
+            </div>
+            <div>
+              <label className="text-sm font-medium">Username</label>
+              <p className="text-lg font-semibold">@{currentUser.username}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium">Email</label>
+              <p className="text-lg">{currentUser.email}</p>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
