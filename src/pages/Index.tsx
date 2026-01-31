@@ -101,7 +101,10 @@ const Index = () => {
                 <Icon name="Mail" size={18} className="text-yellow-600 mt-0.5" />
                 <p className="text-xs text-yellow-800">На вашу почту будет отправлен код подтверждения</p>
               </div>
-              <Button className="w-full h-12 gradient-yellow text-white font-semibold hover:opacity-90 transition-opacity shadow-lg">
+              <Button 
+                className="w-full h-12 gradient-yellow text-white font-semibold hover:opacity-90 transition-opacity shadow-lg"
+                onClick={() => setIsAuthenticated(true)}
+              >
                 Зарегистрироваться
               </Button>
             </TabsContent>
